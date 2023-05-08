@@ -1,0 +1,300 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider        = "prisma-client-js"
+    previewFeatures = ["jsonProtocol", "extendedWhereUnique"]
+}
+
+datasource db {
+    provider     = "mysql"
+    url          = env("DATABASE_URL")
+    relationMode = "prisma"
+}
+
+generator zod {
+    provider = "zod-prisma-types"
+    output   = "schemas"
+
+    useMultipleFiles                 = true
+    createInputTypes                 = false // default is true
+    createModelTypes                 = true // default is true
+    addInputTypeValidation           = false // default is true
+    useDefaultValidators             = true // default is true
+    createOptionalDefaultValuesTypes = false // default is false
+    coerceDate                       = false // default is true
+}
+
+///********** ENUMS ************
+enum Subscription {
+    None
+    Basic
+    Deluxe
+    Pro
+}
+
+enum SystemLinkType {
+    Owner
+    Editor
+}
+
+enum Suit {
+    Club
+    Diamond
+    Heart
+    Spade
+    NT
+}
+
+enum NBO {
+    EBU
+    ACBL
+}
+
+enum CardingType {
+    None
+    Standard
+    Reverse
+    Other
+}
+
+enum DiscardType {
+    None
+    Count
+    Attitude
+    SuitPref
+    OddEven
+    Other
+}
+
+///********** MODELS ************
+model User {
+    id              String           @id @db.VarChar(100)
+    name            String?
+    email           String           @unique
+    image           String?
+    stripeId        String?
+    subscription    Subscription     @default(None)
+    systemLinks     SystemLink[]
+    nationalNumbers NationalNumber[]
+    partnerRequests PartnerRequest[]
+
+    partners   Partner[]    @relation("UserPartnerLink")
+    partners2  Partner[]    @relation("UserPartnerLink2")
+    Convention Convention[]
+}
+
+model NationalNumber {
+    id     String @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    user   User   @relation(fields: [userId], references: [id])
+    userId String @db.Char(32) /// @zod.string.max(32)
+
+    number String @db.VarChar(20) /// @zod.string.max(20)
+    nbo    NBO
+
+    @@unique([userId, nbo])
+}
+
+model Partner {
+    user   User   @relation("UserPartnerLink", fields: [userId], references: [id])
+    userId String @db.VarChar(100)
+
+    partner   User   @relation("UserPartnerLink2", fields: [partnerId], references: [id])
+    partnerId String @db.VarChar(100)
+
+    @@unique([userId, partnerId])
+}
+
+model PartnerRequest {
+    id        String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+    email     String
+
+    user   User   @relation(fields: [userId], references: [id])
+    userId String @db.VarChar(100)
+
+    @@index([userId])
+}
+
+model SystemLink {
+    user   User   @relation(fields: [userId], references: [id])
+    userId String @db.VarChar(100)
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @db.Char(32) /// @zod.string.max(32)
+
+    lastOpenedAt DateTime
+
+    type SystemLinkType
+
+    @@unique([userId, systemId])
+    @@index([systemId])
+}
+
+model System {
+    id             String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @default(now()) @updatedAt
+    slug           String   @unique @db.VarChar(30) /// @zod.string.max(30).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {message: "Must contain only numbers, lowercase letters or hyphens"})
+    name           String   @db.VarChar(100) /// @zod.string.max(100)
+    biddingMethods String   @db.VarChar(100) /// @zod.string.max(100)
+
+    systemLink           SystemLink[]
+    openings             Opening[]
+    conventionCardEbu    ConventionCardEbu?
+    responses            OpeningResponse[]
+    carding              Carding?
+    aceAskingSchemes     AceAskingScheme[]
+    ConventionSystemLink ConventionSystemLink[]
+
+    @@index([slug])
+}
+
+/// @zod.import(["import {BidDefinitionSchema} from '../../custom'"])
+model Opening {
+    id          String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now()) @updatedAt
+    description String   @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    suit        Suit
+    level       Int      @db.TinyInt
+
+    definition Json /// @zod.custom.use(BidDefinitionSchema)
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @db.Char(32) /// @zod.string.max(32)
+
+    responses OpeningResponse[]
+
+    @@index([systemId])
+}
+
+/// @zod.import(["import {BidDefinitionSchema} from '../../custom'"])
+model OpeningResponse {
+    id          String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now()) @updatedAt
+    description String   @default("") @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    sequence    String   @db.VarChar(50) /// @zod.string.max(50)
+    suit        Suit
+    level       Int      @db.TinyInt
+
+    definition Json /// @zod.custom.use(BidDefinitionSchema)
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @db.Char(32) /// @zod.string.max(32)
+
+    opening   Opening @relation(fields: [openingId], references: [id])
+    openingId String  @db.Char(32)
+
+    @@index([systemId])
+    @@index([openingId])
+}
+
+model ConventionCardEbu {
+    id        String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @unique @db.Char(32) /// @zod.string.max(32)
+
+    @@index([systemId])
+}
+
+model Carding {
+    id        String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+
+    attitude      CardingType
+    attitudeOther String      @db.VarChar(200) /// @zod.custom.use(z.string().max(200).optional().or(z.literal('')))
+    count         CardingType
+    countOther    String      @db.VarChar(200) /// @zod.custom.use(z.string().max(200).optional().or(z.literal('')))
+    suitPref      CardingType
+    suitPrefOther String      @db.VarChar(200) /// @zod.custom.use(z.string().max(200).optional().or(z.literal('')))
+    smith         CardingType
+    smithOther    String      @db.VarChar(200) /// @zod.custom.use(z.string().max(200).optional().or(z.literal('')))
+    discards      DiscardType
+    discardsOther String      @db.VarChar(200) /// @zod.custom.use(z.string().max(200).optional().or(z.literal('')))
+
+    notes String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @unique @db.Char(32) /// @zod.string.max(32)
+
+    @@index([systemId])
+}
+
+/// @zod.import(["import {AceAskingBidSchema} from '../../custom'", "import {AceAskingResponseSchema} from '../../custom'"])
+model AceAskingScheme {
+    id          String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now()) @updatedAt
+    name        String   @db.VarChar(100) /// @zod.string.max(100)
+    description String   @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+
+    askingBid              Json /// @zod.custom.use(AceAskingBidSchema)
+    responses              Json /// @zod.custom.use(AceAskingResponseSchema)
+    furtherResponses       String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    actionOverInterference String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @db.Char(32) /// @zod.string.max(32)
+
+    @@index([systemId])
+}
+
+model Convention {
+    id          String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now()) @updatedAt
+    name        String   @db.VarChar(100) /// @zod.string.max(100)
+    description String   @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+
+    applies      String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    notes        String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    intervention String @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+
+    user   User   @relation(fields: [userId], references: [id])
+    userId String @db.VarChar(100)
+
+    responses            ConventionResponse[]
+    ConventionSystemLink ConventionSystemLink[]
+
+    @@index([userId])
+}
+
+/// @zod.import(["import {BidDefinitionSchema} from '../../custom'"])
+model ConventionResponse {
+    id          String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @default(now()) @updatedAt
+    description String   @default("") @db.VarChar(500) /// @zod.custom.use(z.string().max(500).optional().or(z.literal('')))
+    sequence    String   @db.VarChar(50) /// @zod.string.max(50)
+    suit        Suit
+    level       Int      @db.TinyInt
+
+    definition Json /// @zod.custom.use(BidDefinitionSchema)
+
+    convention   Convention @relation(fields: [conventionId], references: [id])
+    conventionId String     @db.VarChar(100)
+
+    @@index([conventionId])
+}
+
+model ConventionSystemLink {
+    id        String   @id @default(cuid()) @db.Char(32) /// @zod.string.max(32)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+
+    convention   Convention @relation(fields: [conventionId], references: [id])
+    conventionId String     @db.Char(32) /// @zod.string.max(32)
+
+    system   System @relation(fields: [systemId], references: [id])
+    systemId String @db.Char(32) /// @zod.string.max(32)
+
+    @@index([conventionId])
+    @@index([systemId])
+}
